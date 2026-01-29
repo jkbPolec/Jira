@@ -1,8 +1,8 @@
 package repository
 
-import domain.Task
+import domain.TaskComponent
 
 interface TaskRepository {
-    fun getAllTasks(): List<Task>
-    fun addTask(task: Task)
+    fun getAllTasks(): List<TaskComponent>
+    fun addTask(task: TaskComponent)
 }

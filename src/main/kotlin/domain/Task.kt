@@ -1,19 +1,45 @@
 package domain
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import memento.*
 import observer.*
 import state.*
 
+enum class Priority { LOW, MEDIUM, HIGH, URGENT }
+
+interface TaskComponent {
+    val id: Long
+    val title: String
+    val state: TaskState
+    fun accept(visitor: TaskVisitor): Double
+}
+
+class Epic(
+    override val id: Long,
+    override val title: String
+) : TaskComponent {
+    val children = mutableStateListOf<TaskComponent>()
+    override val state: TaskState
+        get() = if (children.all { it.state is DoneState } && children.isNotEmpty()) DoneState() else InProgressState()
+
+    override fun accept(visitor: TaskVisitor): Double = visitor.visitEpic(this)
+
+    fun addSubtask(component: TaskComponent) {
+        children.add(component)
+    }
+}
+
 class Task(
-    val id: Long,
-    val title: String,
+    override val id: Long,
+    override val title: String,
     initialDescription: String,
+    val priority: Priority = Priority.MEDIUM,
     initialAssignee: String? = null
-) {
-    var state by mutableStateOf<TaskState>(TodoState())
+) : TaskComponent {
+    override var state by mutableStateOf<TaskState>(TodoState())
     var description by mutableStateOf(initialDescription)
     var assignee by mutableStateOf(initialAssignee)
 
@@ -22,8 +48,10 @@ class Task(
 
     fun addObserver(observer: TaskObserver) { observers.add(observer) }
 
+    override fun accept(visitor: TaskVisitor): Double = visitor.visitTask(this)
+
     private fun saveToHistory() {
-        history.push(TaskMemento(state, assignee, description))
+        history.push(TaskMemento(state, assignee, description, priority))
     }
 
     fun changeState(newState: TaskState) {
@@ -43,6 +71,7 @@ class Task(
         this.state = memento.state
         this.assignee = memento.assignee
         this.description = memento.description
+        // priority is val, we don't restore it as it shouldn't change
     }
 
     fun moveForward() {

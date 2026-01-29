@@ -1,4 +1,4 @@
-# Mini-Jira Workflow Manager
+./# Mini-Jira Workflow Manager
 
 **Mini-Jira** to projekt demonstracyjny stworzony w Kotlinie, który implementuje uproszczony system zarządzania zadaniami (workflow). Głównym celem projektu jest pokazanie praktycznego zastosowania **klasycznych wzorców projektowych** (GoF) w nowoczesnym środowisku **Compose for Desktop**.
 

@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import domain.Task
+import domain.*
 import iterator.TaskBoard
 import observer.TaskObserver
 import repository.InMemoryTaskRepository
@@ -39,35 +39,70 @@ class UiLogger : TaskObserver {
 }
 
 @Composable
-fun TaskCard(task: Task) {
+fun TaskCard(component: TaskComponent, invoker: CommandInvoker) {
+    val visitor = remember { ProgressVisitor() }
+    val progress = component.accept(visitor)
+
     Card(
         modifier = Modifier.fillMaxWidth().padding(8.dp),
         elevation = 4.dp,
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(task.title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text(task.description, fontSize = 12.sp, color = Color.Gray)
-            Text("Assignee: ${task.assignee ?: "Unassigned"}", fontSize = 11.sp)
+            if (component is Task) {
+                val priorityColor = when (component.priority) {
+                    Priority.LOW -> Color(0xFF81C784)
+                    Priority.MEDIUM -> Color(0xFF64B5F6)
+                    Priority.HIGH -> Color(0xFFFFB74D)
+                    Priority.URGENT -> Color(0xFFE57373)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(priorityColor, RoundedCornerShape(6.dp))
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(component.title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                Text(component.description, fontSize = 12.sp, color = Color.Gray)
+                Text("Priority: ${component.priority}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Assignee: ${component.assignee ?: "Unassigned"}", fontSize = 11.sp)
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                if (task.canUndo()) {
-                    IconButton(onClick = { task.undo() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Undo", tint = Color.Red)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (component.canUndo()) {
+                        IconButton(onClick = { invoker.undoLast() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Undo", tint = Color.Red)
+                        }
+                    }
+                    if (component.state !is DoneState) {
+                        IconButton(onClick = {
+                            invoker.executeCommand(MoveForwardCommand(component))
+                        }) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = "Next", tint = Color(0xFF4CAF50))
+                        }
                     }
                 }
-                if (task.state !is DoneState) {
-                    IconButton(onClick = { task.moveForward() }) {
-                        Icon(Icons.Default.ArrowForward, contentDescription = "Next", tint = Color(0xFF4CAF50))
-                    }
+            } else if (component is Epic) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Add, contentDescription = "Epic", tint = Color.Magenta)
+                    Spacer(Modifier.width(8.dp))
+                    Text(component.title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color.Magenta)
                 }
+                Text("Epic Progress: ${progress.toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                LinearProgressIndicator(
+                    progress = (progress / 100.0).toFloat(),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    color = Color.Magenta
+                )
+                Text("Subtasks: ${component.children.size}", fontSize = 11.sp)
             }
         }
     }
 }
 
 @Composable
-fun TaskColumn(title: String, tasks: List<Task>, modifier: Modifier) {
+fun TaskColumn(title: String, tasks: List<TaskComponent>, modifier: Modifier, invoker: CommandInvoker) {
     Column(modifier = modifier.fillMaxHeight().padding(4.dp)) {
         Text(
             title,
@@ -78,7 +113,7 @@ fun TaskColumn(title: String, tasks: List<Task>, modifier: Modifier) {
         Divider(thickness = 2.dp, color = Color.LightGray)
         LazyColumn {
             items(tasks) { task ->
-                TaskCard(task)
+                TaskCard(task, invoker)
             }
         }
     }
@@ -88,23 +123,59 @@ fun main() = application {
     val repository = remember { InMemoryTaskRepository() }
     val board = remember { TaskBoard(repository) }
     val logger = remember { UiLogger() }
+    val assignmentStrategy = remember { PriorityBasedAssignmentStrategy() }
+    val invoker = remember { CommandInvoker() }
 
-    Window(onCloseRequest = ::exitApplication, title = "Mini-Jira Workflow (Patterns Demo)") {
+    Window(onCloseRequest = ::exitApplication, title = "Advanced Jira Workflow (Complexity Demo)") {
         MaterialTheme {
             Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF0F0F0))) {
 
-                TopAppBar(title = { Text("Mini-Jira Desktop") }, actions = {
+                TopAppBar(title = { Text("Advanced Mini-Jira") }, actions = {
                     Button(onClick = {
-                        val newTask = Task(
-                            id = System.currentTimeMillis(),
-                            title = "Task ${repository.getAllTasks().size + 1}",
-                            initialDescription = "Implement design patterns"
-                        )
-                        newTask.addObserver(logger)
-                        repository.addTask(newTask)
-                    }) {
-                        Icon(Icons.Default.Add, null)
-                        Text("Add Task")
+                        val epic = Epic(System.currentTimeMillis(), "Epic ${repository.getAllTasks().size + 1}")
+                        repository.addTask(epic)
+                        logger.onMessage("Created new Epic: ${epic.title}")
+                    }, colors = ButtonDefaults.buttonColors(backgroundColor = Color.Magenta)) {
+                        Text("New Epic", color = Color.White)
+                    }
+
+                    Priority.values().forEach { priority ->
+                        Button(
+                            onClick = {
+                                val newTask = Task(
+                                    id = System.currentTimeMillis(),
+                                    title = "Task ${repository.getAllTasks().size + 1}",
+                                    initialDescription = "Complex task with $priority priority",
+                                    priority = priority
+                                )
+                                newTask.addObserver(logger)
+                                
+                                // Automatic assignment based on strategy
+                                val assignee = assignmentStrategy.findAssignee(newTask, repository)
+                                newTask.assignee = assignee
+                                
+                                // Add to last Epic if exists
+                                val lastEpic = repository.getAllTasks().filterIsInstance<Epic>().lastOrNull()
+                                if (lastEpic != null) {
+                                    lastEpic.addSubtask(newTask)
+                                    logger.onMessage("Added task to Epic: ${lastEpic.title}")
+                                }
+                                
+                                repository.addTask(newTask)
+                                logger.onMessage("Auto-assigned $assignee to new ${priority} task")
+                            },
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = when (priority) {
+                                    Priority.LOW -> Color(0xFF81C784)
+                                    Priority.MEDIUM -> Color(0xFF64B5F6)
+                                    Priority.HIGH -> Color(0xFFFFB74D)
+                                    Priority.URGENT -> Color(0xFFE57373)
+                                }
+                            )
+                        ) {
+                            Text("+ $priority", fontSize = 10.sp)
+                        }
                     }
                 })
 
@@ -114,7 +185,8 @@ fun main() = application {
                         TaskColumn(
                             title = stateName,
                             tasks = board.getTasksInState(stateName),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            invoker = invoker
                         )
                     }
                 }

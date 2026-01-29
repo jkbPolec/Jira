@@ -7,4 +7,5 @@ sealed interface TaskState {
     fun review(task: Task)
     fun complete(task: Task)
     fun name(): String
+    fun canMoveForward(task: Task): Boolean = true
 }
